@@ -87,9 +87,9 @@ class Game(object):
         self.__listen = True
         while self.__listen:
             if not self.is_full():
-                client_socket, client_address = self.__socket.accept()
-                print("Trying to connect: " + str(client_address[0]))
-                player = Thread(target=self.handle_client, args=(client_socket, self._game_port))
+                client_socket, client_addr = self.__socket.accept()
+                print("Trying to connect: " + str(client_addr[0]))
+                player = Thread(target=self.handle_client, args=(client_socket, self._connection_port))
                 player.start()
             else:
                 client_socket, client_address = sock.accept()
@@ -110,17 +110,19 @@ class Game(object):
 
     def handle_client(self, client_socket, port):
         """Starts the communication between a single client and the server."""
-        Game.connect_to_client(client_socket, port, self.timeout)
-        client_socket.close()
-        sock = socket.socket()
-        sock.bind((self.__ip, port))
-        sock.listen(1)
-        client_socket, client_address = sock.accept()
+        # Game.connect_to_client(client_socket, port, self.timeout)
+        # client_socket.close()
+        # client_socket = socket.socket()
+        # client_socket.connect((client_addr[0], port))
+        # sock.bind((self.__ip, port))
+        # sock.listen(1)
+        # client_socket, client_address = sock.accept()
         if Game.connect_to_client(client_socket, port, self.timeout) is None:
             return None
         player = Player.get_player_object(self, client_socket)
         self.__add_to_game(player)
         print("Connected: " + str(client_socket.getsockname()[0]))
+        self.__call_init_player_client(player)
         sender = Thread(target=player.send_loop)
         receiver = Thread(target=player.recv_loop)
         sender.start()
@@ -128,6 +130,13 @@ class Game(object):
         sender.join()
         receiver.join()
         self.remove(player)
+
+    def __call_init_player_client(self, player):
+        """Calls player.init_player_client with the right parameters."""
+        if player.get_team() == Game.red_team:
+            player.init_player_client(copy.copy(self.__red_team), copy.copy(self.__blue_team))
+        elif player.get_team() == Game.blue_team:
+            player.init_player_client(copy.copy(self.__blue_team), copy.copy(self.__red_team))
 
     def __add_to_game(self, player):
         """Add a player to a team.
@@ -205,12 +214,22 @@ class Player(object):
             self.__locations[player] = player.get_location()
         self.sock_name = str(sock.getsockname()[0])
 
-    # def init_in_game(self):
-    #     """Must be called after adding the player object to the game (That was given to the constructor).
-    #     Should not be called if added through game.__add_to_game.
-    #     Returns None."""
-    #     for player in self.__game_state:
-    #         self.__locations[player] = player.get_location()
+    @property
+    def hero(self):
+        return self.__hero
+
+    def init_player_client(self, allies, enemies):
+        """Must be called after adding the player object to the game (That was given to the constructor).
+        allies and enemies are lists of players.
+        Returns None."""
+        picklable_allies = [player.hero for player in allies]
+        picklable_enemies = [player.hero for player in enemies]
+        self._send("ALLIES")
+        self._send_by_size(pickle.dumps(picklable_allies), 32)
+        self._send("ENEMIES")
+        self._send_by_size(pickle.dumps(picklable_enemies), 32)
+        self._send("HERO POS")
+        self._send_by_size(str(allies.index(self)), 32)
 
     def get_location(self):
         """
@@ -314,7 +333,7 @@ class Player(object):
                 break
             if data == "" or data == "DISCONNECT":
                 break
-            debug_print("recv: ", cnt, " - ", self.sock_name)
+            debug_print("recv: %s - %s" % (cnt, self.sock_name))
             self.handle_player_data(data)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
@@ -329,13 +348,15 @@ class Player(object):
         """
         self.__send = True
         cnt = 0
+        snd_cnt = 0
         while self.__send:
             current_state = self.__game.get_state()
             send = self.__add_send_updates(current_state)
             try:
                 if send != "":
                     self._send_by_size(send, 32)
-                    debug_print("sent: ", cnt, " - ", self.sock_name)
+                    debug_print("sent: %s(%s) - %s" % (cnt, snd_cnt, self.sock_name))
+                    snd_cnt += 1
             except socket.error:
                 break
             self.__update_game_state(current_state)
@@ -390,7 +411,7 @@ class Player(object):
             side = "ALLIES"
         else:
             side = "ENEMIES"
-        return "%s~ADD~%s" % (side, self.__hero.pickled_no_image())
+        return "%s~ADD~%s" % (side, pickle.dumps(player.hero))
 
     def __line_update_del(self, player, index):
         """Returns a line of deleting a player from the player's match as should be sent to the client."""

@@ -1,5 +1,6 @@
 import pygame
 import pickle
+import copy
 
 
 class Character(pygame.sprite.Sprite):
@@ -31,15 +32,17 @@ class Character(pygame.sprite.Sprite):
     def pickled_no_image(self):
         """Returns a string with the Character object pickled but image is set to None
         since Surface objects cannot be pickled."""
-        temp_image = None
-        if self.image is not None:
-            temp_image = self.image.copy()
-            self.image = None
+        temp_image = self.image.copy()
+        self.image = None
         pickled = pickle.dumps(self)
         self.image = temp_image
         return pickled
 
-    # def update_character_image(self, team):
-    #     """Updates the character's image according to his team.
-    #     team can be 'BLUE' or 'RED'."""
-    #     self.image = pygame.image.load("assets\\" + team + "_player.png").convert_alpha()
+    def character_no_image(self):
+        """Returns a copy of the same Character object, without the image.
+        Mainly used for pickling."""
+        temp_image = self.image.copy()
+        self.image = None
+        char = copy.deepcopy(self)
+        self.image = temp_image
+        return char
