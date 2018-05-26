@@ -32,12 +32,11 @@ class Game(object):
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
-        self.__min_port = game_port
+        self._game_port = game_port
         self.max_players = max_players
-        self.__next_port = self.__min_port
         self.__listen = False
         self.__match = False
-        self.timeout = 2
+        self.timeout = None
         self.__game_map_name = game_map
         self.__game_map_size = Image.open(game_map).size
         self.__spawn_loc = spawn_loc
@@ -90,9 +89,8 @@ class Game(object):
             if not self.is_full():
                 client_socket, client_address = self.__socket.accept()
                 print("Trying to connect: " + str(client_address[0]))
-                player = Thread(target=self.handle_client, args=(client_socket, self.__next_port))
+                player = Thread(target=self.handle_client, args=(client_socket, self._game_port))
                 player.start()
-                self.__next_port += 1
             else:
                 client_socket, client_address = sock.accept()
                 client_socket.sendall("SERVER IS FULL")
@@ -140,6 +138,7 @@ class Game(object):
         elif player.get_team() == Game.blue_team:
             if player not in self.__blue_team:
                 self.__blue_team.append(player)
+        # player.init_in_game()
 
     def remove(self, player):
         """
@@ -198,17 +197,26 @@ class Player(object):
         self._upperx = (self.__game.get_game_map_size()[0]) - (resolution[0] / 2)
         self._lowerx = resolution[0] / 2
         self._lowery = resolution[1] / 2
-        self.__location = self.__hero.rect.center
         self.__send = False
         self.__recv = False
         self.__game_state = self.__game.get_state()
+        self.__locations = {}
+        for player in self.__game_state:
+            self.__locations[player] = player.get_location()
         self.sock_name = str(sock.getsockname()[0])
+
+    # def init_in_game(self):
+    #     """Must be called after adding the player object to the game (That was given to the constructor).
+    #     Should not be called if added through game.__add_to_game.
+    #     Returns None."""
+    #     for player in self.__game_state:
+    #         self.__locations[player] = player.get_location()
 
     def get_location(self):
         """
         :return: The location of the player on the game_map. (x, y)
         """
-        return copy.deepcopy(self.__location)
+        return copy.deepcopy(self.__hero.rect.center)
 
     def get_team(self):
         """
@@ -325,15 +333,23 @@ class Player(object):
             current_state = self.__game.get_state()
             send = self.__add_send_updates(current_state)
             try:
-                self._send_by_size(send, 32)
+                if send != "":
+                    self._send_by_size(send, 32)
+                    debug_print("sent: ", cnt, " - ", self.sock_name)
             except socket.error:
                 break
-            self.__game_state = current_state
-            debug_print("sent: ", cnt, " - ", self.sock_name)
+            self.__update_game_state(current_state)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
         self.remove()
+
+    def __update_game_state(self, current_state):
+        """Updates self.__game_state and self.__locations.
+        current_state is self.__game.get_state used in last loop."""
+        self.__game_state = current_state
+        for player in self.__game_state:
+            self.__locations[player] = player.get_location()
 
     def __add_send_updates(self, current_state):
         """
@@ -345,7 +361,8 @@ class Player(object):
         send = ""
         for player in current_state:
             if player in self.__game_state:
-                send += self.__line_update_location(player) + "\n\n"
+                if player.get_location() != self.__locations[player]:
+                    send += self.__line_update_location(player) + "\n\n"
             else:
                 send += self.__line_update_new(player) + "\n\n"
         for index, player in enumerate(self.__game_state):
@@ -364,7 +381,7 @@ class Player(object):
             side = "ENEMIES"
         if self.__team == Game.red_team:
             return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
-        else:
+        elif self.__team == Game.blue_team:
             return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
 
     def __line_update_new(self, player):
@@ -373,7 +390,7 @@ class Player(object):
             side = "ALLIES"
         else:
             side = "ENEMIES"
-        return "%s~ADD~%s" % (side, self.__hero)
+        return "%s~ADD~%s" % (side, self.__hero.pickled_no_image())
 
     def __line_update_del(self, player, index):
         """Returns a line of deleting a player from the player's match as should be sent to the client."""
