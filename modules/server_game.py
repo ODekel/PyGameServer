@@ -1,6 +1,6 @@
 import math
 import socket
-from threading import Thread
+import threading
 from sys import exit as sysexit
 from os import path
 from PIL import Image
@@ -12,12 +12,18 @@ import imp
 character = imp.load_source("character", "modules\\character.py")
 
 DEBUG = True
+print_lock = threading.Lock()
 
 
 class Game(object):
     """Represents an object used to store data and help control a game."""
     red_team = "RED"
     blue_team = "BLUE"
+    __inactive_time_kick = 30
+
+    @property
+    def inactive_time_kick(self):
+        return Game.__inactive_time_kick
 
     def __init__(self, ip, connection_port, game_port, game_map, spawn_loc, max_players=0):
         """Create a new game object.
@@ -36,7 +42,7 @@ class Game(object):
         self.max_players = max_players
         self.__listen = False
         self.__match = False
-        self.timeout = None
+        self.timeout = 0.1
         self.__game_map_name = game_map
         self.__game_map_size = Image.open(game_map).size
         self.__spawn_loc = spawn_loc
@@ -89,7 +95,7 @@ class Game(object):
             if not self.is_full():
                 client_socket, client_addr = self.__socket.accept()
                 print("Trying to connect: " + str(client_addr[0]))
-                player = Thread(target=self.handle_client, args=(client_socket, self._connection_port))
+                player = threading.Thread(target=self.handle_client, args=(client_socket, self._connection_port))
                 player.start()
             else:
                 client_socket, client_address = sock.accept()
@@ -117,14 +123,14 @@ class Game(object):
         # sock.bind((self.__ip, port))
         # sock.listen(1)
         # client_socket, client_address = sock.accept()
-        if Game.connect_to_client(client_socket, port, self.timeout) is None:
+        if Game.connect_to_client(client_socket, port) is None:
             return None
         player = Player.get_player_object(self, client_socket)
         self.__add_to_game(player)
         print("Connected: " + str(client_socket.getsockname()[0]))
         self.__call_init_player_client(player)
-        sender = Thread(target=player.send_loop)
-        receiver = Thread(target=player.recv_loop)
+        sender = threading.Thread(target=player.send_loop)
+        receiver = threading.Thread(target=player.recv_loop)
         sender.start()
         receiver.start()
         sender.join()
@@ -212,7 +218,7 @@ class Player(object):
         self.__locations = {}
         for player in self.__game_state:
             self.__locations[player] = player.get_location()
-        self.sock_name = str(sock.getsockname()[0])
+        self.sock_name = str(sock.getpeername()[0])
 
     @property
     def hero(self):
@@ -222,12 +228,10 @@ class Player(object):
         """Must be called after adding the player object to the game (That was given to the constructor).
         allies and enemies are lists of players.
         Returns None."""
-        picklable_allies = [player.hero for player in allies]
-        picklable_enemies = [player.hero for player in enemies]
         self._send("ALLIES")
-        self._send_by_size(pickle.dumps(picklable_allies), 32)
+        self._send_by_size(pickle.dumps([player.hero for player in allies]), 32)
         self._send("ENEMIES")
-        self._send_by_size(pickle.dumps(picklable_enemies), 32)
+        self._send_by_size(pickle.dumps([player.hero for player in enemies]), 32)
         self._send("HERO POS")
         self._send_by_size(str(allies.index(self)), 32)
 
@@ -274,16 +278,24 @@ class Player(object):
 
     def _recv_by_size(self, header_size):
         """
-        Receive by size a string from the client. If first message is not an int, will return it.
+        Receive by size a string from the client.
+        If an empty string is received (ie, the other side disconnected), an empty string will be returned.
         :param header_size: The size (in bytes) of the header.
         :return: The string received.
         """
-        sizestr = self.__sock.recv(header_size)
-        try:
-            size = int(sizestr)
-        except ValueError:
-            return sizestr
-        return self.__sock.recv(size)
+        str_size = ""
+        str_size += self.__sock.recv(header_size)
+        if str_size == "":
+            return ""
+
+        while len(str_size) < header_size:
+            str_size += self.__sock.recv(header_size - len(str_size))
+        size = int(str_size)
+
+        data = ""
+        while len(data) < size:
+            data += self.__sock.recv(size - len(data))
+        return data
 
     def receive_player_data(self):
         """
@@ -297,13 +309,14 @@ class Player(object):
         except (pickle.UnpicklingError, KeyError):
             return data
 
-    def handle_player_data(self, pressed):
+    def handle_player_data(self, pickled_pressed):
         """
         Applies data to the game the player is part of, once.
         pressed is a pygame.key.pressed object.
         Compatible with receive_player_data method.
         :return: None.
         """
+        pressed = pickle.loads(pickled_pressed)
         newy = self.__hero.rect.centery
         newx = self.__hero.rect.centerx
         if pressed[pygame.K_w]:
@@ -326,18 +339,23 @@ class Player(object):
         """
         self.__recv = True
         cnt = 0
+        self.__sock.settimeout(self.__game.timeout)
         while self.__recv:
             try:
-                data = self.receive_player_data()
+                data = self._recv_by_size(32)
+            except socket.timeout:
+                pass
             except socket.error:
                 break
-            if data == "" or data == "DISCONNECT":
-                break
-            debug_print("recv: %s - %s" % (cnt, self.sock_name))
-            self.handle_player_data(data)
-            cnt += 1
-            pygame.time.Clock().tick(self.__fps)
+            else:
+                if data == "" or data == "DISCONNECT":
+                    break
+                debug_print("recv: %s - %s" % (cnt, self.sock_name))
+                cnt += 1
+                self.handle_player_data(data)
+            # pygame.time.Clock().tick(self.__fps)
         self.__recv = False
+        self.__send = False
         self.remove()
 
     def send_loop(self):
@@ -347,6 +365,7 @@ class Player(object):
         :return: None.
         """
         self.__send = True
+        self.__sock.settimeout(self.__game.timeout)
         cnt = 0
         snd_cnt = 0
         while self.__send:
@@ -363,6 +382,7 @@ class Player(object):
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
+        self.__recv = False
         self.remove()
 
     def __update_game_state(self, current_state):
@@ -493,10 +513,7 @@ class Player(object):
             client._send("RESOLUTION HEIGHT")
             resolution_y = int(client._recv_by_size(32))
             client._send("OK END")
-            if client._recv(8) == "MAP NAME":
-                client._send_by_size(client.get_map_name(), 32)
-            else:
-                raise socket.error
+            client.__info_for_client()
         except (socket.error, TypeError):
             could_not_connect(sock)
             return None
@@ -506,6 +523,17 @@ class Player(object):
             could_not_connect(sock)
             return None
 
+    def __info_for_client(self):
+        """Part of the Game.get_player_object method that sends data to the client."""
+        if self._recv(8) == "MAP NAME":
+            self._send_by_size(self.get_map_name(), 32)
+        else:
+            raise socket.error
+        # if self._recv(16) == "INACTIVE TIMEOUT":
+        #     self._send_by_size(str(Game.inactive_time_kick), 32)
+        # else:
+        #     raise socket.error
+
 
 def could_not_connect(sock):
     print("Could not connect: " + sock.getsockname()[0])
@@ -513,5 +541,7 @@ def could_not_connect(sock):
 
 def debug_print(*s):
     """Prints only when global DEBUG is set to True."""
+    print_lock.acquire()
     if DEBUG:
         print("".join(str(word) for word in s))
+    print_lock.release()
