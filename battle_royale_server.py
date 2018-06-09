@@ -11,7 +11,7 @@ def main():
     game_map = "assets\\dungeon_map.jpg"
     spawn_loc = (1000, 1000)
     my_game = Game(ip, connection_port, game_port, game_map, spawn_loc)
-    my_game.listen()
+    my_game.start_match()
 
 
 if __name__ == '__main__':

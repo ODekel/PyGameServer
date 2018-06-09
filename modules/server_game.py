@@ -48,6 +48,7 @@ class Game(object):
         self.__spawn_loc = spawn_loc
         self.__red_team = []
         self.__blue_team = []
+        self.__connected = 0    # All the players that have connected to the game.
 
     def get_state(self):
         """
@@ -85,6 +86,13 @@ class Game(object):
         """
         return self.__blue_team.index(player)
 
+    def start_match(self):
+        """Start listening to new players connecting to the.
+        Disconnects when the amount of players in game is reached.
+        Runs the game."""
+        threading.Thread(target=self.listen).start()
+        self.run_game()
+
     def listen(self):
         """Lets players connect to the server using the connection_port and game_port.
         Will not accept more players than max_players to the server."""
@@ -92,15 +100,18 @@ class Game(object):
         self.__socket.listen(self.max_players)
         self.__listen = True
         while self.__listen:
-            if not self.is_full():
+            if not self.is_game_filled():
                 client_socket, client_addr = self.__socket.accept()
                 print("Trying to connect: " + str(client_addr[0]))
                 player = threading.Thread(target=self.handle_client, args=(client_socket, self._connection_port))
+                self.__connected += 1
                 player.start()
             else:
-                client_socket, client_address = sock.accept()
-                client_socket.sendall("SERVER IS FULL")
-                client_socket.close()
+                self.__listen = False
+                # client_socket, client_address = sock.accept()
+                # client_socket.sendall("SERVER IS FULL")
+                # client_socket.close()
+        self.__listen = False
         self.__socket.close()
         self.__socket = socket.socket()
 
@@ -108,11 +119,11 @@ class Game(object):
         """Stop accepting new clients using connection_port. Stops the listen method."""
         self.__listen = False
 
-    def is_full(self):
+    def is_game_filled(self):
         """
-        :return: True when the amount of connected players equals to max_players, False otherwise.
+        :return: True when the amount of players that have connected reaches max_players, False otherwise.
         """
-        return True if len(self.__red_team) + len(self.__blue_team) >= self.max_players != 0 else False
+        return True if self.__connected >= self.max_players != 0 else False
 
     def handle_client(self, client_socket, port):
         """Starts the communication between a single client and the server."""
@@ -136,6 +147,23 @@ class Game(object):
         sender.join()
         receiver.join()
         self.remove(player)
+
+    def run_game(self):
+        """Runs all the game's systems and interaction between players.
+        Will run infinitely until stopped.
+        If stopped, will stop all other processes of the, since the game can't run without this function running."""
+        self.__match = True
+        while self.__match:
+            players = self.get_state()
+            heroes = [player.hero for player in players]
+            for player in players:
+                self._collision_detection(player, player.hero, heroes)
+
+    @staticmethod
+    def _collision_detection(player, hero, heroes):
+        """Runs the pygame spritecollide and handles it."""
+        if pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero])is not None:
+            player.remove()
 
     def __call_init_player_client(self, player):
         """Calls player.init_player_client with the right parameters."""
@@ -346,7 +374,10 @@ class Player(object):
             except socket.timeout:
                 pass
             except socket.error:
-                break
+                self.__recv = False
+            except AttributeError:
+                if self.__sock is None:
+                    self.__recv = False
             else:
                 if data == "" or data == "DISCONNECT":
                     break
