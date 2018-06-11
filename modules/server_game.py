@@ -162,8 +162,8 @@ class Game(object):
     @staticmethod
     def _collision_detection(player, hero, heroes):
         """Runs the pygame spritecollide and handles it."""
-        if pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero])is not None:
-            player.remove()
+        if pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero]) is not None:
+            player.kill("YOU DIED")
 
     def __call_init_player_client(self, player):
         """Calls player.init_player_client with the right parameters."""
@@ -491,6 +491,13 @@ class Player(object):
         self.__game.remove(self)
         self.__game = None
         self.__sock = None
+
+    def kill(self, msg):
+        """This function should be called when the player was killed
+        or needs to be taken out of the for any other reason.
+        'msg' will be displayed to the player."""
+        self._send_by_size("PLAYER KICKED~%s" % msg, 32)
+        self.remove()
 
     def _updatex(self, newx):
         """Returns value of hero's x based on newx and limits of map."""
