@@ -8,8 +8,12 @@ import time
 import pickle
 import copy
 import pygame
+import random
 import imp
 character = imp.load_source("character", "modules\\character.py")
+Character = character.Character
+func = imp.load_source("function", "modules\\function.py")
+GameFunction = func.GameFunction
 
 DEBUG = True
 print_lock = threading.Lock()
@@ -35,6 +39,7 @@ class Game(object):
         spawn_loc is the location the player will spawn in (x, y).
         max_players is the maximum amount of players on the server at any given moment.
         If absent or 0 there is no limit."""
+        # f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
@@ -49,6 +54,12 @@ class Game(object):
         self.__red_team = []
         self.__blue_team = []
         self.__connected = 0    # All the players that have connected to the game.
+        self.__game_func = GameFunction(self._default_game_func)
+
+    def change_game_function(self, f, *args):
+        """Changes the function that runs the game. change this to change how the game plays.
+        For the change to effect the game, this function MUST be called before start_match is called."""
+        self.__game_func = GameFunction(f, *args)
 
     def get_state(self):
         """
@@ -91,7 +102,7 @@ class Game(object):
         Disconnects when the amount of players in game is reached.
         Runs the game."""
         threading.Thread(target=self.listen).start()
-        self.run_game()
+        self.__game_func()
 
     def listen(self):
         """Lets players connect to the server using the connection_port and game_port.
@@ -148,22 +159,14 @@ class Game(object):
         receiver.join()
         self.remove(player)
 
-    def run_game(self):
+    def _default_game_func(self):
         """Runs all the game's systems and interaction between players.
         Will run infinitely until stopped.
         If stopped, will stop all other processes of the, since the game can't run without this function running."""
+        times_per_second = 15
         self.__match = True
         while self.__match:
-            players = self.get_state()
-            heroes = [player.hero for player in players]
-            for player in players:
-                self._collision_detection(player, player.hero, heroes)
-
-    @staticmethod
-    def _collision_detection(player, hero, heroes):
-        """Runs the pygame spritecollide and handles it."""
-        if pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero]) is not None:
-            player.kill("YOU DIED")
+            pygame.time.Clock().tick(times_per_second)
 
     def __call_init_player_client(self, player):
         """Calls player.init_player_client with the right parameters."""
