@@ -3,6 +3,11 @@ import imp
 game = imp.load_source("game", "modules\\server_game.py")
 Game = game.Game
 
+ITERATIONS_PER_SECOND = 30  # How many times will game_func run each second.
+COLLISION_DICT = {}
+# each player's hero is in the dictionary,
+# pointing to a set of other players he collided with last iteration.
+
 
 def main():
     """The main method for the game server."""
@@ -26,12 +31,37 @@ def game_func(my_game):
         heroes = [player.hero for player in players]
         for player in players:
             collision_detection(player, player.hero, heroes)
+        pygame.time.Clock().tick(ITERATIONS_PER_SECOND)
 
 
 def collision_detection(player, hero, heroes):
     """Runs the pygame spritecollide and handles it."""
-    if pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero]) is not None:
+    collided = pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero])
+    if collided is not None:
+        handle_collision(player, hero, collided)
+
+
+def handle_collision(player, hero, collided):
+    """Handles what happens when two players in the game collide.
+    Returns True any change to game data was made, False otherwise."""
+    global COLLISION_DICT
+    if collided in COLLISION_DICT[hero]:
+        return
+    handle_dict(hero, collided)
+    hero.health -= collided.damage
+    if hero.health <= 0:
+        COLLISION_DICT.pop(hero, None)
         player.kill("YOU DIED")
+
+
+def handle_dict(hero, collided):
+    """Handles the dict in case of a collide"""
+    global COLLISION_DICT
+    try:
+        COLLISION_DICT[hero].add(collided)
+    except KeyError:
+        COLLISION_DICT[hero] = {collided}
+
 
 
 if __name__ == '__main__':

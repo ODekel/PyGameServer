@@ -58,7 +58,10 @@ class Game(object):
 
     def change_game_function(self, f, *args):
         """Changes the function that runs the game. change this to change how the game plays.
-        For the change to effect the game, this function MUST be called before start_match is called."""
+        Every change to the hero attributes of players in the game will be noticed by the running default loops.
+        Uses the vars() built in function on the hero attribute.
+        For the change to effect the game, this function MUST be called before start_match is called.
+        The function should run in a loop until the game ends."""
         self.__game_func = GameFunction(f, *args)
 
     def get_state(self):
@@ -246,9 +249,9 @@ class Player(object):
         self.__send = False
         self.__recv = False
         self.__game_state = self.__game.get_state()
-        self.__locations = {}
+        self.__game_attributes = {}
         for player in self.__game_state:
-            self.__locations[player] = player.get_location()
+            self.__game_attributes[player] = vars(player.hero)
         self.sock_name = str(sock.getpeername()[0])
 
     @property
@@ -366,6 +369,7 @@ class Player(object):
         """
         Will run until stopped, receiving data from the player and updating attributes accordingly.
         When stopped by the server or the client, will delete the player from the game.
+        This function receives everything the game needs to run correctly, but does not add the rules of the game.
         :return: None.
         """
         self.__recv = True
@@ -396,6 +400,7 @@ class Player(object):
         """
         Will run until stopped, sending data to the player.
         When stopped by the server or the client, will delete the player from the game.
+        This function sends everything the game needs to run correctly, but does not add the rules of the game.
         :return: None.
         """
         self.__send = True
@@ -424,7 +429,7 @@ class Player(object):
         current_state is self.__game.get_state used in last loop."""
         self.__game_state = current_state
         for player in self.__game_state:
-            self.__locations[player] = player.get_location()
+            self.__game_attributes = vars(player.hero)
 
     def __add_send_updates(self, current_state):
         """
@@ -436,8 +441,11 @@ class Player(object):
         send = ""
         for player in current_state:
             if player in self.__game_state:
-                if player.get_location() != self.__locations[player]:
-                    send += self.__line_update_location(player) + "\n\n"
+                for key, value in vars(player.hero):
+                    if self.__game_attributes[player][key] != value:
+                        send += self.__line_update_value(player, key)
+                # if player.get_location() != self.__locations[player]:
+                #   send += self.__line_update_location(player) + "\n\n"
             else:
                 send += self.__line_update_new(player) + "\n\n"
         for index, player in enumerate(self.__game_state):
