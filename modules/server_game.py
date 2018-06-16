@@ -429,7 +429,7 @@ class Player(object):
         current_state is self.__game.get_state used in last loop."""
         self.__game_state = current_state
         for player in self.__game_state:
-            self.__game_attributes = vars(player.hero)
+            self.__game_attributes[player] = vars(player.hero)
 
     def __add_send_updates(self, current_state):
         """
@@ -441,50 +441,58 @@ class Player(object):
         send = ""
         for player in current_state:
             if player in self.__game_state:
-                for key, value in vars(player.hero):
+                debug_print(vars(player.hero))
+                for key, value in vars(player.hero).iteritems():
                     if self.__game_attributes[player][key] != value:
                         send += self.__line_update_value(player, key)
                 # if player.get_location() != self.__locations[player]:
                 #   send += self.__line_update_location(player) + "\n\n"
             else:
                 send += self.__line_update_new(player) + "\n\n"
-        for index, player in enumerate(self.__game_state):
+        for player in self.__game_state:
             if player not in current_state:
-                send += self.__line_update_del(player, index) + "\n\n"
+                send += self.__line_update_del(player) + "\n\n"
         return send
 
-    def __line_update_location(self, player):
-        """Returns a line of updating a player's location as should be sent to the client."""
-        loc = pickle.dumps(player.get_location())
-        if self == player:
-            return "HERO~" + loc
-        elif self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
-        if self.__team == Game.red_team:
-            return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
-        elif self.__team == Game.blue_team:
-            return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
+    def __line_update_value(self, player, key):
+        """Returns a line that updates one of the player's attributes as should be sent to the client."""
+        value = pickle.dumps(vars(player.hero)[key])
+        return "%s~%s~%s~%s~%s" % ("UPDATE", self.get_side(player), player.get_index(), key, value)
 
     def __line_update_new(self, player):
-        """Returns a line of adding a new player to the player's game as should be sent to the client."""
-        if self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
-        return "%s~ADD~%s" % (side, pickle.dumps(player.hero))
+        """Returns a line that adds a new player to the player's game as should be sent to the client."""
+        return "%s~%s~%s" % ("ADD", self.get_side(player), pickle.dumps(player.hero))
 
-    def __line_update_del(self, player, index):
-        """Returns a line of deleting a player from the player's match as should be sent to the client."""
+    def __line_update_del(self, player):
+        """Returns a line that deletes a player from the player's match as should be sent to the client."""
+        return "%s~%s~%s" % ("REMOVE", self.get_side(player), player.get_index())
+
+    def get_side(self, player):
+        """Returns whether the player is in the dame team as self or not."""
         if self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
+            return "ALLIES"
+        return "ENEMIES"
+
+    def get_index(self):
+        """Returns the index of the player in his team's list of players."""
         if self.__team == Game.red_team:
-            return "%s~%s~%s" % (side, str(index), "REMOVE")
+            return self.__game.get_index_red(self)
         elif self.__team == Game.blue_team:
-            return "%s~%s~%s" % (side, str(index), "REMOVE")
+            return self.__game.get_index_blue(self)
+
+    # def __line_update_location(self, player):
+    #     """Returns a line that updates a player's location as should be sent to the client."""
+    #     loc = pickle.dumps(player.get_location())
+    #     if self == player:
+    #         return "HERO~" + loc
+    #     elif self.__team == player.get_team():
+    #         side = "ALLIES"
+    #     else:
+    #         side = "ENEMIES"
+    #     if self.__team == Game.red_team:
+    #         return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
+    #     elif self.__team == Game.blue_team:
+    #         return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
 
     def remove(self):
         """
