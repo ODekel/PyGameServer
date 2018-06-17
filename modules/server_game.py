@@ -86,8 +86,7 @@ class Game(object):
         """Return a dict with the players' attributes (vars)."""
         attributes = {}
         for player in self.get_state():
-            attributes[player] = vars(player.hero)
-            attributes[player][Character.location_string] = player.get_location()   # Location
+            attributes[player] = copy.deepcopy(vars(player.hero))
         return attributes
 
     def get_game_map_size(self):
@@ -462,16 +461,15 @@ class Player(object):
         send = ""
         for player in current_state:
             if player in self.__game_state:
+                debug_print(current_attributes[player])
                 for key, value in current_attributes[player].iteritems():
                     if self.__game_attributes[player][key] != value:
-                        send += self.__line_update_value(player, key) + "\n\n"
-                # if player.get_location() != self.__locations[player]:
-                #   send += self.__line_update_location(player) + "\n\n"
+                        send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
-                send += self.__line_update_new(player) + "\n\n"
+                send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
         for player in self.__game_state:
             if player not in current_state:
-                send += self.__line_update_del(player) + "\n\n"
+                send += self.__line_update_del(player) + "\n\n"    # Client doesn't know player disconnected.
         return send
 
     def __line_update_value(self, player, attribute):
@@ -502,7 +500,7 @@ class Player(object):
 
     def get_attribute_dict(self):
         attr_dict = vars(self.__hero)
-        attr_dict[Character.location_string] = self.get_location()
+        # attr_dict[Character.location_string()] = self.get_location()
         return attr_dict
 
     # def __line_update_location(self, player):
