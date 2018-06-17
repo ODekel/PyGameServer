@@ -6,6 +6,13 @@ import copy
 class Character(pygame.sprite.Sprite):
     """A character in a pygame game. Inherits from pygame.sprite.Sprite.
     If you want to update the Character's position on a map, update using Character.rect."""
+
+    __LOCATION_STRING = "rect.center"    # How to find the location of a character. Supports setattr.
+
+    @property
+    def location_string(self):
+        return Character.__LOCATION_STRING
+
     def __init__(self, visual, health, speed, damage, attack_range, attack_speed, death_timer, abilities, center):
         """Create a new game character.
         'visual' is an image file (will be converted_alpha, so transparent background is supported).
