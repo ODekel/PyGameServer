@@ -36,22 +36,33 @@ def game_func(my_game):
 
 def collision_detection(player, hero, heroes):
     """Runs the pygame spritecollide and handles it."""
-    collided = pygame.sprite.spritecollideany(hero, [sprite for sprite in heroes if sprite != hero])
+    heroes.remove(hero)
+    collided = pygame.sprite.spritecollideany(hero, heroes)
     if collided is not None:
         handle_collision(player, hero, collided)
+    heroes.append(hero)
 
 
 def handle_collision(player, hero, collided):
     """Handles what happens when two players in the game collide.
     Returns True any change to game data was made, False otherwise."""
     global COLLISION_DICT
-    if collided in COLLISION_DICT[hero]:
-        return
+    try:
+        if collided in COLLISION_DICT[hero]:
+            return False
+    except KeyError:
+        pass
     handle_dict(hero, collided)
     hero.health -= collided.damage
     if hero.health <= 0:
-        COLLISION_DICT.pop(hero, None)
-        player.kill("YOU DIED")
+        handle_death(player, hero)
+    return True
+
+
+def handle_death(player, hero):
+    """Handles the killing of a player."""
+    COLLISION_DICT.pop(hero, None)
+    player.kill("YOU DIED")
 
 
 def handle_dict(hero, collided):
@@ -61,7 +72,6 @@ def handle_dict(hero, collided):
         COLLISION_DICT[hero].add(collided)
     except KeyError:
         COLLISION_DICT[hero] = {collided}
-
 
 
 if __name__ == '__main__':

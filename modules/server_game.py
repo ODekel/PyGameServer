@@ -269,9 +269,8 @@ class Player(object):
         self._lowery = resolution[1] / 2
         self.__send = False
         self.__recv = False
-        self.__game_state = None
         self.__game_attributes = {}
-        self.__update_game_state(self.__game.get_state(), self.__game.get_player_attributes())
+        self.__update_game_attributes(self.__game.get_player_attributes())
         self.sock_name = str(sock.getpeername()[0])
 
     @property
@@ -428,9 +427,8 @@ class Player(object):
         cnt = 0
         snd_cnt = 0
         while self.__send:
-            current_state = self.__game.get_state()
             current_attributes = self.__game.get_player_attributes()
-            send = self.__add_send_updates(current_state, current_attributes)
+            send = self.__add_send_updates(current_attributes)
             try:
                 if send != "":
                     self._send_by_size(send, 32)
@@ -438,38 +436,36 @@ class Player(object):
                     snd_cnt += 1
             except socket.error:
                 break
-            self.__update_game_state(current_state, current_attributes)
+            self.__update_game_attributes(current_attributes)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
         self.__recv = False
         self.remove()
 
-    def __update_game_state(self, current_state, current_attributes):
-        """Updates self.__game_state and self.__locations.
-        current_state is self.__game.get_state used in last loop."""
-        self.__game_state = current_state
+    def __update_game_attributes(self, current_attributes):
+        """Updates self.__game_attributes and self.__locations.
+        current_attributes is self.__game.get_attributes used in last loop."""
         self.__game_attributes = current_attributes
 
-    def __add_send_updates(self, current_state, current_attributes):
+    def __add_send_updates(self, current_attributes):
         """
         Returns a string to send to the client,
-        according to a protocol and the changes between current_state and self.__game_state.
-        :param current_state: The current state of the game.
+        according to a protocol and the changes between current_attributes and self.__game_attributes.
+        :param current_attributes: The current state of the game as received from Game.get_player_attributes().
         :return: The string to send to the client for updates.
         """
         send = ""
-        for player in current_state:
-            if player in self.__game_state:
-                debug_print(current_attributes[player])
+        for player in current_attributes:
+            if player in self.__game_attributes:
                 for key, value in current_attributes[player].iteritems():
                     if self.__game_attributes[player][key] != value:
                         send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
                 send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
-        for player in self.__game_state:
-            if player not in current_state:
-                send += self.__line_update_del(player) + "\n\n"    # Client doesn't know player disconnected.
+        for index, player in enumerate(self.__game_attributes):
+            if player not in current_attributes:
+                send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
 
     def __line_update_value(self, player, attribute):
@@ -481,9 +477,9 @@ class Player(object):
         """Returns a line that adds a new player to the player's game as should be sent to the client."""
         return "%s~%s~%s" % ("ADD", self.get_side(player), pickle.dumps(player.hero, pickle.HIGHEST_PROTOCOL))
 
-    def __line_update_del(self, player):
+    def __line_update_del(self, player, index):
         """Returns a line that deletes a player from the player's match as should be sent to the client."""
-        return "%s~%s~%s" % ("REMOVE", self.get_side(player), str(player.get_index()))
+        return "%s~%s~%s" % ("REMOVE", self.get_side(player), str(index))
 
     def get_side(self, player):
         """Returns whether the player is in the dame team as self or not."""
@@ -621,7 +617,7 @@ def could_not_connect(sock):
 
 def debug_print(*s):
     """Prints only when global DEBUG is set to True."""
-    print_lock.acquire()
     if DEBUG:
+        print_lock.acquire()
         print("".join(str(word) for word in s))
-    print_lock.release()
+        print_lock.release()
