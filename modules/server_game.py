@@ -39,7 +39,8 @@ class Game(object):
         spawn_loc is the location the player will spawn in (x, y).
         max_players is the maximum amount of players on the server at any given moment.
         If absent or 0 there is no limit."""
-        # f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
+        # with open("assets/player.brhr", 'w+') as f:
+        #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
@@ -52,7 +53,7 @@ class Game(object):
         self.__game_map_size = Image.open(game_map).size
         self.__spawn_loc = spawn_loc
         self.__red_team = []
-        self.__blue_team = []
+        self.__blue_team = []   # 2 teams if I want to make a 2 team game.
         self.__connected = 0    # All the players that have connected to the game.
         self.__game_func = GameFunction(self._default_game_func)
 
@@ -270,7 +271,7 @@ class Player(object):
         self.__send = False
         self.__recv = False
         self.__game_attributes = {}
-        self.__update_game_attributes(self.__game.get_player_attributes())
+        self.__game_state = []
         self.sock_name = str(sock.getpeername()[0])
 
     @property
@@ -287,6 +288,8 @@ class Player(object):
         self._send_by_size(pickle.dumps([player.hero for player in enemies], pickle.HIGHEST_PROTOCOL), 32)
         self._send("HERO POS")
         self._send_by_size(str(allies.index(self)), 32)
+        self.__update_game_attributes(self.__game.get_state(), self.__game.get_player_attributes())
+        # Client is updated.
 
     def get_location(self):
         """
@@ -427,6 +430,7 @@ class Player(object):
         cnt = 0
         snd_cnt = 0
         while self.__send:
+            current_state = self.__game.get_state()
             current_attributes = self.__game.get_player_attributes()
             send = self.__add_send_updates(current_attributes)
             try:
@@ -436,16 +440,17 @@ class Player(object):
                     snd_cnt += 1
             except socket.error:
                 break
-            self.__update_game_attributes(current_attributes)
+            self.__update_game_attributes(current_state, current_attributes)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
         self.__recv = False
         self.remove()
 
-    def __update_game_attributes(self, current_attributes):
+    def __update_game_attributes(self, current_state, current_attributes):
         """Updates self.__game_attributes and self.__locations.
         current_attributes is self.__game.get_attributes used in last loop."""
+        self.__game_state = current_state
         self.__game_attributes = current_attributes
 
     def __add_send_updates(self, current_attributes):
@@ -463,7 +468,7 @@ class Player(object):
                         send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
                 send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
-        for index, player in enumerate(self.__game_attributes):
+        for index, player in enumerate(self.__game_state):
             if player not in current_attributes:
                 send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
@@ -576,7 +581,7 @@ class Player(object):
         :return: A Player object that represents the client, or None if a connection could not be made.
         """
         try:
-            client = Player(game, sock, None, None, 0, (0, 0))
+            client = Player(game, sock, None, None, 0, (0, 0))  # dummy
             client._send("CHARACTER?")
             hero = pickle.loads(client._recv_by_size(32))
             client._send("TEAM?")

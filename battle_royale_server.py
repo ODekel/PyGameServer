@@ -28,7 +28,7 @@ def game_func(my_game):
     my_game.__match = True
     while my_game.__match:
         players = my_game.get_state()
-        heroes = [player.hero for player in players]
+        heroes = {player.hero for player in players}
         for player in players:
             collision_detection(player, player.hero, heroes)
         pygame.time.Clock().tick(ITERATIONS_PER_SECOND)
@@ -36,42 +36,37 @@ def game_func(my_game):
 
 def collision_detection(player, hero, heroes):
     """Runs the pygame spritecollide and handles it."""
+    global COLLISION_DICT
     heroes.remove(hero)
-    collided = pygame.sprite.spritecollideany(hero, heroes)
-    if collided is not None:
-        handle_collision(player, hero, collided)
-    heroes.append(hero)
+    handle_collision(player, hero, heroes, set(pygame.sprite.spritecollide(hero, heroes, False)))
+    heroes.add(hero)
 
 
-def handle_collision(player, hero, collided):
-    """Handles what happens when two players in the game collide.
-    Returns True any change to game data was made, False otherwise."""
+def handle_collision(player, hero, heroes, colliders):
+    """Handles what happens to the players that collide with hero in the game."""
     global COLLISION_DICT
     try:
-        if collided in COLLISION_DICT[hero]:
-            return False
+        COLLISION_DICT[hero] -= (set(heroes) - colliders)  # Remove all those who didn't collide.
     except KeyError:
-        pass
-    handle_dict(hero, collided)
-    hero.health -= collided.damage
+        COLLISION_DICT[hero] = colliders
+    else:
+        colliders -= COLLISION_DICT[hero]   # Use only players that only collided with hero now.
+        COLLISION_DICT[hero].update(colliders)   # Add colliders to COLLISION_DICT[hero]
+    for collided in colliders:
+        handle_damage(hero, collided)
     if hero.health <= 0:
         handle_death(player, hero)
-    return True
+
+
+def handle_damage(taker, dealer):
+    """Handles the damage one character deals to another."""
+    taker.health -= dealer.damage
 
 
 def handle_death(player, hero):
     """Handles the killing of a player."""
     COLLISION_DICT.pop(hero, None)
     player.kill("YOU DIED")
-
-
-def handle_dict(hero, collided):
-    """Handles the dict in case of a collide"""
-    global COLLISION_DICT
-    try:
-        COLLISION_DICT[hero].add(collided)
-    except KeyError:
-        COLLISION_DICT[hero] = {collided}
 
 
 if __name__ == '__main__':
