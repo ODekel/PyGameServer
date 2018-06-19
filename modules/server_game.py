@@ -8,8 +8,12 @@ import time
 import pickle
 import copy
 import pygame
+import random
 import imp
 character = imp.load_source("character", "modules\\character.py")
+Character = character.Character
+func = imp.load_source("function", "modules\\function.py")
+GameFunction = func.GameFunction
 
 DEBUG = True
 print_lock = threading.Lock()
@@ -35,6 +39,8 @@ class Game(object):
         spawn_loc is the location the player will spawn in (x, y).
         max_players is the maximum amount of players on the server at any given moment.
         If absent or 0 there is no limit."""
+        # with open("assets/player.brhr", 'w+') as f:
+        #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
@@ -47,13 +53,42 @@ class Game(object):
         self.__game_map_size = Image.open(game_map).size
         self.__spawn_loc = spawn_loc
         self.__red_team = []
-        self.__blue_team = []
+        self.__blue_team = []   # 2 teams if I want to make a 2 team game.
+        self.__connected = 0    # All the players that have connected to the game.
+        self.__game_func = GameFunction(self._default_game_func)
+
+    def change_game_function(self, f, *args):
+        """Changes the function that runs the game. change this to change how the game plays.
+        Every change to the hero attributes of players in the game will be noticed by the running default loops.
+        Uses the vars() built in function on the hero attribute.
+        For the change to effect the game, this function MUST be called before start_match is called.
+        The function should run in a loop until the game ends."""
+        self.__game_func = GameFunction(f, *args)
+
+    @property
+    def match(self):
+        return self.__match
+
+    def stop_match(self, msg):
+        """Kills the match. All communication will stop and the server will stop running.
+        msg will be displayed to the players when the game is killed."""
+        self.__listen = False
+        self.__match = False
+        for player in self.__red_team + self.__blue_team:
+            player.kill(msg)
 
     def get_state(self):
         """
         :return: A list with all player objects in game.
         """
         return copy.copy(self.__red_team + self.__blue_team)
+
+    def get_player_attributes(self):
+        """Return a dict with the players' attributes (vars)."""
+        attributes = {}
+        for player in self.get_state():
+            attributes[player] = copy.deepcopy(vars(player.hero))
+        return attributes
 
     def get_game_map_size(self):
         """Returns the game_map's size."""
@@ -85,6 +120,14 @@ class Game(object):
         """
         return self.__blue_team.index(player)
 
+    def start_match(self):
+        """Start listening to new players connecting to the.
+        Disconnects when the amount of players in game is reached.
+        Runs the game."""
+        self.__match = True
+        threading.Thread(target=self.listen).start()
+        self.__game_func()
+
     def listen(self):
         """Lets players connect to the server using the connection_port and game_port.
         Will not accept more players than max_players to the server."""
@@ -92,15 +135,18 @@ class Game(object):
         self.__socket.listen(self.max_players)
         self.__listen = True
         while self.__listen:
-            if not self.is_full():
+            if not self.is_game_filled():
                 client_socket, client_addr = self.__socket.accept()
                 print("Trying to connect: " + str(client_addr[0]))
                 player = threading.Thread(target=self.handle_client, args=(client_socket, self._connection_port))
+                self.__connected += 1
                 player.start()
             else:
-                client_socket, client_address = sock.accept()
-                client_socket.sendall("SERVER IS FULL")
-                client_socket.close()
+                self.__listen = False
+                # client_socket, client_address = sock.accept()
+                # client_socket.sendall("SERVER IS FULL")
+                # client_socket.close()
+        self.__listen = False
         self.__socket.close()
         self.__socket = socket.socket()
 
@@ -108,11 +154,11 @@ class Game(object):
         """Stop accepting new clients using connection_port. Stops the listen method."""
         self.__listen = False
 
-    def is_full(self):
+    def is_game_filled(self):
         """
-        :return: True when the amount of connected players equals to max_players, False otherwise.
+        :return: True when the amount of players that have connected reaches max_players, False otherwise.
         """
-        return True if len(self.__red_team) + len(self.__blue_team) >= self.max_players != 0 else False
+        return True if self.__connected >= self.max_players != 0 else False
 
     def handle_client(self, client_socket, port):
         """Starts the communication between a single client and the server."""
@@ -136,6 +182,16 @@ class Game(object):
         sender.join()
         receiver.join()
         self.remove(player)
+
+    def _default_game_func(self):
+        """Runs all the game's systems and interaction between players.
+        Will run infinitely until stopped.
+        If stopped, will stop all other processes of the, since the game can't run without this function running."""
+        # times_per_second = 15
+        # self.__match = True
+        # while self.__match:
+        #     pygame.time.Clock().tick(times_per_second)
+        pass
 
     def __call_init_player_client(self, player):
         """Calls player.init_player_client with the right parameters."""
@@ -214,10 +270,8 @@ class Player(object):
         self._lowery = resolution[1] / 2
         self.__send = False
         self.__recv = False
-        self.__game_state = self.__game.get_state()
-        self.__locations = {}
-        for player in self.__game_state:
-            self.__locations[player] = player.get_location()
+        self.__game_attributes = {}
+        self.__game_state = []
         self.sock_name = str(sock.getpeername()[0])
 
     @property
@@ -229,11 +283,13 @@ class Player(object):
         allies and enemies are lists of players.
         Returns None."""
         self._send("ALLIES")
-        self._send_by_size(pickle.dumps([player.hero for player in allies]), 32)
+        self._send_by_size(pickle.dumps([player.hero for player in allies], pickle.HIGHEST_PROTOCOL), 32)
         self._send("ENEMIES")
-        self._send_by_size(pickle.dumps([player.hero for player in enemies]), 32)
+        self._send_by_size(pickle.dumps([player.hero for player in enemies], pickle.HIGHEST_PROTOCOL), 32)
         self._send("HERO POS")
         self._send_by_size(str(allies.index(self)), 32)
+        self.__update_game_attributes(self.__game.get_state(), self.__game.get_player_attributes())
+        # Client is updated.
 
     def get_location(self):
         """
@@ -335,6 +391,7 @@ class Player(object):
         """
         Will run until stopped, receiving data from the player and updating attributes accordingly.
         When stopped by the server or the client, will delete the player from the game.
+        This function receives everything the game needs to run correctly, but does not add the rules of the game.
         :return: None.
         """
         self.__recv = True
@@ -346,7 +403,10 @@ class Player(object):
             except socket.timeout:
                 pass
             except socket.error:
-                break
+                self.__recv = False
+            except AttributeError:
+                if self.__sock is None:
+                    self.__recv = False
             else:
                 if data == "" or data == "DISCONNECT":
                     break
@@ -362,6 +422,7 @@ class Player(object):
         """
         Will run until stopped, sending data to the player.
         When stopped by the server or the client, will delete the player from the game.
+        This function sends everything the game needs to run correctly, but does not add the rules of the game.
         :return: None.
         """
         self.__send = True
@@ -370,7 +431,8 @@ class Player(object):
         snd_cnt = 0
         while self.__send:
             current_state = self.__game.get_state()
-            send = self.__add_send_updates(current_state)
+            current_attributes = self.__game.get_player_attributes()
+            send = self.__add_send_updates(current_attributes)
             try:
                 if send != "":
                     self._send_by_size(send, 32)
@@ -378,71 +440,83 @@ class Player(object):
                     snd_cnt += 1
             except socket.error:
                 break
-            self.__update_game_state(current_state)
+            self.__update_game_attributes(current_state, current_attributes)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
         self.__recv = False
         self.remove()
 
-    def __update_game_state(self, current_state):
-        """Updates self.__game_state and self.__locations.
-        current_state is self.__game.get_state used in last loop."""
+    def __update_game_attributes(self, current_state, current_attributes):
+        """Updates self.__game_attributes and self.__locations.
+        current_attributes is self.__game.get_attributes used in last loop."""
         self.__game_state = current_state
-        for player in self.__game_state:
-            self.__locations[player] = player.get_location()
+        self.__game_attributes = current_attributes
 
-    def __add_send_updates(self, current_state):
+    def __add_send_updates(self, current_attributes):
         """
         Returns a string to send to the client,
-        according to a protocol and the changes between current_state and self.__game_state.
-        :param current_state: The current state of the game.
+        according to a protocol and the changes between current_attributes and self.__game_attributes.
+        :param current_attributes: The current state of the game as received from Game.get_player_attributes().
         :return: The string to send to the client for updates.
         """
         send = ""
-        for player in current_state:
-            if player in self.__game_state:
-                if player.get_location() != self.__locations[player]:
-                    send += self.__line_update_location(player) + "\n\n"
+        for player in current_attributes:
+            if player in self.__game_attributes:
+                for key, value in current_attributes[player].iteritems():
+                    if self.__game_attributes[player][key] != value:
+                        send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
-                send += self.__line_update_new(player) + "\n\n"
+                send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
         for index, player in enumerate(self.__game_state):
-            if player not in current_state:
-                send += self.__line_update_del(player, index) + "\n\n"
+            if player not in current_attributes:
+                send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
 
-    def __line_update_location(self, player):
-        """Returns a line of updating a player's location as should be sent to the client."""
-        loc = pickle.dumps(player.get_location())
-        if self == player:
-            return "HERO~" + loc
-        elif self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
-        if self.__team == Game.red_team:
-            return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
-        elif self.__team == Game.blue_team:
-            return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
+    def __line_update_value(self, player, attribute):
+        """Returns a line that updates one of the player's attributes as should be sent to the client."""
+        value = pickle.dumps(getattr(player.hero, attribute), pickle.HIGHEST_PROTOCOL)
+        return "%s~%s~%s~%s~%s" % ("UPDATE", self.get_side(player), str(player.get_index()), attribute, value)
 
     def __line_update_new(self, player):
-        """Returns a line of adding a new player to the player's game as should be sent to the client."""
-        if self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
-        return "%s~ADD~%s" % (side, pickle.dumps(player.hero))
+        """Returns a line that adds a new player to the player's game as should be sent to the client."""
+        return "%s~%s~%s" % ("ADD", self.get_side(player), pickle.dumps(player.hero, pickle.HIGHEST_PROTOCOL))
 
     def __line_update_del(self, player, index):
-        """Returns a line of deleting a player from the player's match as should be sent to the client."""
+        """Returns a line that deletes a player from the player's match as should be sent to the client."""
+        return "%s~%s~%s" % ("REMOVE", self.get_side(player), str(index))
+
+    def get_side(self, player):
+        """Returns whether the player is in the dame team as self or not."""
         if self.__team == player.get_team():
-            side = "ALLIES"
-        else:
-            side = "ENEMIES"
+            return "ALLIES"
+        return "ENEMIES"
+
+    def get_index(self):
+        """Returns the index of the player in his team's list of players."""
         if self.__team == Game.red_team:
-            return "%s~%s~%s" % (side, str(index), "REMOVE")
+            return self.__game.get_index_red(self)
         elif self.__team == Game.blue_team:
-            return "%s~%s~%s" % (side, str(index), "REMOVE")
+            return self.__game.get_index_blue(self)
+
+    def get_attribute_dict(self):
+        attr_dict = vars(self.__hero)
+        # attr_dict[Character.location_string()] = self.get_location()
+        return attr_dict
+
+    # def __line_update_location(self, player):
+    #     """Returns a line that updates a player's location as should be sent to the client."""
+    #     loc = pickle.dumps(player.get_location())
+    #     if self == player:
+    #         return "HERO~" + loc
+    #     elif self.__team == player.get_team():
+    #         side = "ALLIES"
+    #     else:
+    #         side = "ENEMIES"
+    #     if self.__team == Game.red_team:
+    #         return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
+    #     elif self.__team == Game.blue_team:
+    #         return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
 
     def remove(self):
         """
@@ -460,6 +534,13 @@ class Player(object):
         self.__game.remove(self)
         self.__game = None
         self.__sock = None
+
+    def kill(self, msg):
+        """This function should be called when the player was killed
+        or needs to be taken out of the for any other reason.
+        'msg' will be displayed to the player."""
+        self._send_by_size("PLAYER KICKED~%s" % msg, 32)
+        self.remove()
 
     def _updatex(self, newx):
         """Returns value of hero's x based on newx and limits of map."""
@@ -500,7 +581,7 @@ class Player(object):
         :return: A Player object that represents the client, or None if a connection could not be made.
         """
         try:
-            client = Player(game, sock, None, None, 0, (0, 0))
+            client = Player(game, sock, None, None, 0, (0, 0))  # dummy
             client._send("CHARACTER?")
             hero = pickle.loads(client._recv_by_size(32))
             client._send("TEAM?")
@@ -541,7 +622,7 @@ def could_not_connect(sock):
 
 def debug_print(*s):
     """Prints only when global DEBUG is set to True."""
-    print_lock.acquire()
     if DEBUG:
+        print_lock.acquire()
         print("".join(str(word) for word in s))
-    print_lock.release()
+        print_lock.release()
