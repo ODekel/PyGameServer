@@ -21,13 +21,13 @@ print_lock = threading.Lock()
 
 class Game(object):
     """Represents an object used to store data and help control a game."""
+    __inactive_time_kick = 30
     red_team = "RED"
     blue_team = "BLUE"
-    __inactive_time_kick = 30
 
-    @property
-    def inactive_time_kick(self):
-        return Game.__inactive_time_kick
+    # @property
+    # def inactive_time_kick(self):
+    #     return Game.__inactive_time_kick
 
     def __init__(self, ip, connection_port, game_port, game_map, spawn_loc, max_players=0):
         """Create a new game object.
@@ -39,7 +39,8 @@ class Game(object):
         spawn_loc is the location the player will spawn in (x, y).
         max_players is the maximum amount of players on the server at any given moment.
         If absent or 0 there is no limit."""
-        # f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
+        # with open(Player.object_file, 'w+') as f:
+        #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, spawn_loc).pickled_no_image())
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
@@ -52,7 +53,7 @@ class Game(object):
         self.__game_map_size = Image.open(game_map).size
         self.__spawn_loc = spawn_loc
         self.__red_team = []
-        self.__blue_team = []
+        self.__blue_team = []   # 2 teams if I want to make a 2 team game.
         self.__connected = 0    # All the players that have connected to the game.
         self.__game_func = GameFunction(self._default_game_func)
 
@@ -170,7 +171,7 @@ class Game(object):
         # client_socket, client_address = sock.accept()
         if Game.connect_to_client(client_socket, port) is None:
             return None
-        player = Player.get_player_object(self, client_socket)
+        player = Player.get_player_object(self, client_socket, Player.server_character)
         self.__add_to_game(player)
         print("Connected: " + str(client_socket.getsockname()[0]))
         self.__call_init_player_client(player)
@@ -249,6 +250,11 @@ class Game(object):
 
 class Player(object):
     """Represents a client in a game."""
+
+    object_file = "assets/player.brhr"
+    server_character = "SERVER SIDE"
+    client_character = "CLIENT SIDE"
+
     def __init__(self, game, sock, hero, team, fps, resolution):
         """Create a new Client object.
         game is the Game object the client is part of.
@@ -270,7 +276,7 @@ class Player(object):
         self.__send = False
         self.__recv = False
         self.__game_attributes = {}
-        self.__update_game_attributes(self.__game.get_player_attributes())
+        self.__game_state = []
         self.sock_name = str(sock.getpeername()[0])
 
     @property
@@ -287,6 +293,8 @@ class Player(object):
         self._send_by_size(pickle.dumps([player.hero for player in enemies], pickle.HIGHEST_PROTOCOL), 32)
         self._send("HERO POS")
         self._send_by_size(str(allies.index(self)), 32)
+        self.__update_game_attributes(self.__game.get_state(), self.__game.get_player_attributes())
+        # Client is updated.
 
     def get_location(self):
         """
@@ -427,6 +435,7 @@ class Player(object):
         cnt = 0
         snd_cnt = 0
         while self.__send:
+            current_state = self.__game.get_state()
             current_attributes = self.__game.get_player_attributes()
             send = self.__add_send_updates(current_attributes)
             try:
@@ -436,16 +445,17 @@ class Player(object):
                     snd_cnt += 1
             except socket.error:
                 break
-            self.__update_game_attributes(current_attributes)
+            self.__update_game_attributes(current_state, current_attributes)
             cnt += 1
             pygame.time.Clock().tick(self.__fps)
         self.__send = False
         self.__recv = False
         self.remove()
 
-    def __update_game_attributes(self, current_attributes):
+    def __update_game_attributes(self, current_state, current_attributes):
         """Updates self.__game_attributes and self.__locations.
         current_attributes is self.__game.get_attributes used in last loop."""
+        self.__game_state = current_state
         self.__game_attributes = current_attributes
 
     def __add_send_updates(self, current_attributes):
@@ -463,7 +473,7 @@ class Player(object):
                         send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
                 send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
-        for index, player in enumerate(self.__game_attributes):
+        for index, player in enumerate(self.__game_state):
             if player not in current_attributes:
                 send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
@@ -567,18 +577,20 @@ class Player(object):
             self.__hero.rect.centery + ((newy - self.__hero.rect.centery) / math.sqrt(2))
 
     @staticmethod
-    def get_player_object(game, sock):
+    def get_player_object(game, sock, character_side):
         """
         Get the info needed to create a game object from the client's socket.
         Works with the send_basic_data method on the client side.
         :param game: The game the client is part of.
         :param sock: The socket used to communicate with the client.
+        :param character_side: determines whether the server decides about
+        the Character object's attributes or the client.
+        Use Player.server_character and Player.client_character to choose.
         :return: A Player object that represents the client, or None if a connection could not be made.
         """
         try:
-            client = Player(game, sock, None, None, 0, (0, 0))
-            client._send("CHARACTER?")
-            hero = pickle.loads(client._recv_by_size(32))
+            client = Player(game, sock, None, None, 0, (0, 0))  # dummy
+            hero = client.__get_hero(character_side)
             client._send("TEAM?")
             team = client._recv_by_size(32)
             # hero.update_character_image(team)    # Receives character with no image.
@@ -589,7 +601,7 @@ class Player(object):
             client._send("RESOLUTION HEIGHT")
             resolution_y = int(client._recv_by_size(32))
             client._send("OK END")
-            client.__info_for_client()
+            client.__info_for_client(hero, character_side)
         except (socket.error, TypeError):
             could_not_connect(sock)
             return None
@@ -599,12 +611,27 @@ class Player(object):
             could_not_connect(sock)
             return None
 
-    def __info_for_client(self):
+    def __get_hero(self, character_side):
+        if character_side == Player.client_character:
+            self._send("CHARACTER?")
+            return pickle.loads(self._recv_by_size(32))
+        else:
+            with open(Player.object_file, 'r+') as f:
+                return pickle.load(f)
+
+    def __info_for_client(self, hero, character_side):
         """Part of the Game.get_player_object method that sends data to the client."""
         if self._recv(8) == "MAP NAME":
             self._send_by_size(self.get_map_name(), 32)
         else:
             raise socket.error
+
+        if character_side == Player.server_character:
+            if self._recv(9) == "CHARACTER":
+                self._send_by_size(pickle.dumps(hero), 32)
+            else:
+                raise socket.error
+
         # if self._recv(16) == "INACTIVE TIMEOUT":
         #     self._send_by_size(str(Game.inactive_time_kick), 32)
         # else:
