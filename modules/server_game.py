@@ -15,7 +15,7 @@ Character = character.Character
 func = imp.load_source("function", "modules\\function.py")
 GameFunction = func.GameFunction
 
-DEBUG = True
+DEBUG = False
 print_lock = threading.Lock()
 
 
@@ -39,13 +39,8 @@ class Game(object):
         spawn_loc is the location the player will spawn in (x, y).
         max_players is the maximum amount of players on the server at any given moment.
         If absent or 0 there is no limit."""
-<<<<<<< HEAD
-        # with open("assets/player.brhr", 'w+') as f:
-        #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, (0, 0)).pickled_no_image())
-=======
         # with open(Player.object_file, 'w+') as f:
         #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, spawn_loc).pickled_no_image())
->>>>>>> collision
         self.__ip = ip
         self.__socket = socket.socket()
         self._connection_port = connection_port
@@ -442,7 +437,10 @@ class Player(object):
         while self.__send:
             current_state = self.__game.get_state()
             current_attributes = self.__game.get_player_attributes()
-            send = self.__add_send_updates(current_attributes)
+            try:
+                send = self.__add_send_updates(current_attributes)
+            except AttributeError:
+                break   # Another thread removed this object while loop was running.
             try:
                 if send != "":
                     self._send_by_size(send, 32)
@@ -511,22 +509,7 @@ class Player(object):
 
     def get_attribute_dict(self):
         attr_dict = vars(self.__hero)
-        # attr_dict[Character.location_string()] = self.get_location()
         return attr_dict
-
-    # def __line_update_location(self, player):
-    #     """Returns a line that updates a player's location as should be sent to the client."""
-    #     loc = pickle.dumps(player.get_location())
-    #     if self == player:
-    #         return "HERO~" + loc
-    #     elif self.__team == player.get_team():
-    #         side = "ALLIES"
-    #     else:
-    #         side = "ENEMIES"
-    #     if self.__team == Game.red_team:
-    #         return "%s~%s~%s" % (side, str(self.__game.get_index_red(player)), loc)
-    #     elif self.__team == Game.blue_team:
-    #         return "%s~%s~%s" % (side, str(self.__game.get_index_blue(player)), loc)
 
     def remove(self):
         """
@@ -536,14 +519,15 @@ class Player(object):
         access the game the player was previously part of.
         :return: None.
         """
-        if self.__sock is None:    # Another thread already removed this object.
-            return
-        print(str(self.sock_name) + " Disconnected")
         self.__recv = False
         self.__send = False
-        self.__game.remove(self)
+        try:
+            self.__game.remove(self)
+        except AttributeError:
+            return    # Another thread has already removed this object.
         self.__game = None
         self.__sock = None
+        print(str(self.sock_name) + " Disconnected")
 
     def kill(self, msg):
         """This function should be called when the player was killed
@@ -595,12 +579,7 @@ class Player(object):
         """
         try:
             client = Player(game, sock, None, None, 0, (0, 0))  # dummy
-<<<<<<< HEAD
-            client._send("CHARACTER?")
-            hero = pickle.loads(client._recv_by_size(32))
-=======
             hero = client.__get_hero(character_side)
->>>>>>> collision
             client._send("TEAM?")
             team = client._recv_by_size(32)
             # hero.update_character_image(team)    # Receives character with no image.
