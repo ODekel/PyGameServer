@@ -8,15 +8,18 @@ COLLISION_DICT = {}
 # each player's hero is in the dictionary,
 # pointing to a set of other players he collided with last iteration.
 
+# GAME ATTRIBUTES
+IP = "0.0.0.0"
+CONNECTION_PORT = 5233
+GAME_PORT = 16728
+GAME_MAP = "assets\\dungeon_map.jpg"
+SPAWN_LOC = (1000, 1000)
+MAX_PLAYERS = 3
+
 
 def main():
     """The main method for the game server."""
-    ip = "0.0.0.0"
-    connection_port = 5233
-    game_port = 16728
-    game_map = "assets\\dungeon_map.jpg"
-    spawn_loc = (1000, 1000)
-    my_game = Game(ip, connection_port, game_port, game_map, spawn_loc)
+    my_game = Game(IP, CONNECTION_PORT, GAME_PORT, GAME_MAP, SPAWN_LOC, MAX_PLAYERS)
     my_game.change_game_function(game_func, my_game)
     my_game.start_match()
 

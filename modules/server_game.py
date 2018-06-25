@@ -56,6 +56,21 @@ class Game(object):
         self.__blue_team = []   # 2 teams if I want to make a 2 team game.
         self.__connected = 0    # All the players that have connected to the game.
         self.__game_func = GameFunction(self._default_game_func)
+        self.__wait_for_players = True
+
+    @property
+    def wait_for_players(self):
+        """If True (default), will wait for max_players to connect before starting the game.
+        If False, will immediately start the game for any player that joins the game."""
+        return self.__wait_for_players
+
+    @wait_for_players.setter
+    def wait_for_players(self, value):
+        """If True (default), will wait for max_players to connect before starting the game.
+        If False, will immediately start the game for any player that joins the game."""
+        if self.__listen or self.__match:
+            raise (AttributeError, "wait_for_player cannot be changed after the game started.")
+        self.__wait_for_players = value
 
     def change_game_function(self, f, *args):
         """Changes the function that runs the game. change this to change how the game plays.
@@ -67,6 +82,7 @@ class Game(object):
 
     @property
     def match(self):
+        """Get self.__match."""
         return self.__match
 
     def stop_match(self, msg):
@@ -131,6 +147,7 @@ class Game(object):
     def listen(self):
         """Lets players connect to the server using the connection_port and game_port.
         Will not accept more players than max_players to the server."""
+        player_threads = []    # Used if self.__wait_for_players is True.
         self.__socket.bind((self.__ip, self._connection_port))
         self.__socket.listen(self.max_players)
         self.__listen = True
@@ -140,12 +157,10 @@ class Game(object):
                 print("Trying to connect: " + str(client_addr[0]))
                 player = threading.Thread(target=self.handle_client, args=(client_socket, self._connection_port))
                 self.__connected += 1
-                player.start()
+                self._handle_new_player_thread(client_socket, player, player_threads)
             else:
                 self.__listen = False
-                # client_socket, client_address = sock.accept()
-                # client_socket.sendall("SERVER IS FULL")
-                # client_socket.close()
+                self._start_game_threads(player_threads)
         self.__listen = False
         self.__socket.close()
         self.__socket = socket.socket()
@@ -160,15 +175,25 @@ class Game(object):
         """
         return True if self.__connected >= self.max_players != 0 else False
 
+    def _handle_new_player_thread(self, player_socket, player_thread, player_threads):
+        """Does what should be done with a thread of a recently connected player.
+        player_thread is the self.handle_client thread of the play.
+        player_threads is the list of all previous threads."""
+        if self.__wait_for_players:
+            player_socket.sendall("WAITING")    # Tell the client the server is not yet full.
+            player_threads.append(player_thread)
+            return
+        player_thread.start()
+
+    def _start_game_threads(self, threads):
+        if self.__wait_for_players:
+            for t in threads:
+                t.start()
+
     def handle_client(self, client_socket, port):
         """Starts the communication between a single client and the server."""
-        # Game.connect_to_client(client_socket, port, self.timeout)
-        # client_socket.close()
-        # client_socket = socket.socket()
-        # client_socket.connect((client_addr[0], port))
-        # sock.bind((self.__ip, port))
-        # sock.listen(1)
-        # client_socket, client_address = sock.accept()
+        if self.__wait_for_players:
+            client_socket.sendall("CONTINUE")
         if Game.connect_to_client(client_socket, port) is None:
             return None
         player = Player.get_player_object(self, client_socket, Player.server_character)
@@ -388,7 +413,7 @@ class Player(object):
             newy += self.__hero.speed
         if pressed[pygame.K_d]:
             newx += self.__hero.speed
-        if newx != self.__hero.rect.centerx and newy != self.__hero.rect.centery:
+        elif newx != self.__hero.rect.centerx and newy != self.__hero.rect.centery:
             newx, newy = self._fix_diagonal_movement(newx, newy)
         self.__hero.rect.center = (self._updatex(newx), self._updatey(newy))
 
