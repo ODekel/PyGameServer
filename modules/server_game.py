@@ -141,8 +141,22 @@ class Game(object):
         Disconnects when the amount of players in game is reached.
         Runs the game."""
         self.__match = True
-        threading.Thread(target=self.listen).start()
+        self._start_listening()
         self.__game_func()
+
+    def _start_listening(self):
+        """
+        Blocking if self.wait_for_players is set to True, otherwise not blocking.
+        This handled like that so that game will only start after all players connected if
+        self.wait_for_players is set to True.
+        :return: None.
+        """
+        if self.__wait_for_players:
+            self.listen()
+            while len(self.get_state()) < self.max_players:    # Wait for all threads to start.
+                pass
+        else:
+            threading.Thread(target=self.listen).start()
 
     def listen(self):
         """Lets players connect to the server using the connection_port and game_port.
@@ -501,8 +515,8 @@ class Player(object):
                         send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
                 send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
-        for index, player in enumerate(self.__game_state):
-            if player not in current_attributes:
+        for index, player in list(enumerate(self.__game_state))[::-1]:    # Going over the list backwards so that when
+            if player not in current_attributes:    # the client deletes more than 1 player at a time there are no bugs.
                 send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
 
