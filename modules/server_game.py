@@ -142,7 +142,7 @@ class Game(object):
         Runs the game."""
         self.__match = True
         self._start_listening()
-        self.__game_func()
+        threading.Thread(target=self.__game_func).start()
 
     def _start_listening(self):
         """
@@ -507,7 +507,7 @@ class Player(object):
         :param current_attributes: The current state of the game as received from Game.get_player_attributes().
         :return: The string to send to the client for updates.
         """
-        send = ""
+        send = self.__add_del_updates(current_attributes)
         for player in current_attributes:
             if player in self.__game_attributes:
                 for key, value in current_attributes[player].iteritems():
@@ -515,10 +515,18 @@ class Player(object):
                         send += self.__line_update_value(player, key) + "\n\n"  # Player changed.
             else:
                 send += self.__line_update_new(player) + "\n\n"    # Client doesn't know about the update yet.
-        for index, player in list(enumerate(self.__game_state))[::-1]:    # Going over the list backwards so that when
-            if player not in current_attributes:    # the client deletes more than 1 player at a time there are no bugs.
-                send += self.__line_update_del(player, index) + "\n\n"    # Client doesn't know player disconnected.
         return send
+
+    def __add_del_updates(self, current_attributes):
+        """
+        :param current_attributes: current game attributes received from self.__game.get_player_attributes().
+        :return: The string to send.
+        """
+        updates = ""
+        for index, player in list(enumerate(self.__game_state))[::-1]:  # Going over the list backwards so that when
+            if player not in current_attributes:  # the client deletes more than 1 player at a time there are no bugs.
+                updates += self.__line_update_del(player, index) + "\n\n"  # Client doesn't know player disconnected.
+        return updates
 
     def __line_update_value(self, player, attribute):
         """Returns a line that updates one of the player's attributes as should be sent to the client."""
