@@ -140,8 +140,8 @@ class Game(object):
         """Start listening to new players connecting to the.
         Disconnects when the amount of players in game is reached.
         Runs the game."""
-        self.__match = True
         self._start_listening()
+        self.__match = True
         threading.Thread(target=self.__game_func).start()
 
     def _start_listening(self):
@@ -207,7 +207,11 @@ class Game(object):
     def handle_client(self, client_socket, port):
         """Starts the communication between a single client and the server."""
         if self.__wait_for_players:
-            client_socket.sendall("CONTINUE")
+            try:
+                client_socket.sendall("CONTINUE")
+            except socket.error:
+                self.__disconnected_before_started(client_socket)
+                return
         if Game.connect_to_client(client_socket, port) is None:
             return None
         player = Player.get_player_object(self, client_socket, Player.server_character)
@@ -222,14 +226,19 @@ class Game(object):
         receiver.join()
         self.remove(player)
 
+    def __disconnected_before_started(self, client):
+        """This function should be called when the client disconnected before the game actually started."""
+        with open(Player.object_file, 'r+') as f:
+            dummy_character = pickle.load(f)
+        dummy = Player(self, client, dummy_character, Game.red_team, 0, (0, 0))
+        self.__add_to_game(dummy)  # Add a dummy to the game so it will start.
+        while not self.__match:
+            pass
+        self.remove(dummy)    # Client should not be in the game.
+
     def _default_game_func(self):
         """Runs all the game's systems and interaction between players.
-        Will run infinitely until stopped.
         If stopped, will stop all other processes of the, since the game can't run without this function running."""
-        # times_per_second = 15
-        # self.__match = True
-        # while self.__match:
-        #     pygame.time.Clock().tick(times_per_second)
         pass
 
     def __call_init_player_client(self, player):
