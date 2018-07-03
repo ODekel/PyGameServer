@@ -1,11 +1,11 @@
 import math
-import socket
 import threading
 from sys import exit as sysexit
 from os import path
 from PIL import Image
 import time
 import pickle
+import socket
 import copy
 import pygame
 import random
@@ -14,6 +14,7 @@ character = imp.load_source("character", "modules\\character.py")
 Character = character.Character
 func = imp.load_source("function", "modules\\function.py")
 GameFunction = func.GameFunction
+Sock = imp.load_source("game_sock", "modules\\game_sock.py").Sock
 
 DEBUG = False
 print_lock = threading.Lock()
@@ -42,7 +43,7 @@ class Game(object):
         # with open(Player.object_file, 'w+') as f:
         #     f.write(Character(r"assets\red_player.png", 3, 4, 1, 15, 1, 5, {}, spawn_loc).pickled_no_image())
         self.__ip = ip
-        self.__socket = socket.socket()
+        self.__socket = Sock()
         self._connection_port = connection_port
         self._game_port = game_port
         self.max_players = max_players
@@ -177,7 +178,7 @@ class Game(object):
                 self._start_game_threads(player_threads)
         self.__listen = False
         self.__socket.close()
-        self.__socket = socket.socket()
+        self.__socket = Sock()
 
     def stop_listening(self):
         """Stop accepting new clients using connection_port. Stops the listen method."""
@@ -194,7 +195,7 @@ class Game(object):
         player_thread is the self.handle_client thread of the play.
         player_threads is the list of all previous threads."""
         if self.__wait_for_players:
-            player_socket.sendall("WAITING")    # Tell the client the server is not yet full.
+            player_socket.send_by_size("WAITING")    # Tell the client the server is not yet full.
             player_threads.append(player_thread)
             return
         player_thread.start()
@@ -208,7 +209,7 @@ class Game(object):
         """Starts the communication between a single client and the server."""
         if self.__wait_for_players:
             try:
-                client_socket.sendall("CONTINUE")
+                client_socket.send_by_size("CONTINUE")
             except socket.error:
                 self.__disconnected_before_started(client_socket)
                 return
@@ -278,15 +279,16 @@ class Game(object):
         """Connect to a client with an already established TCP connection. client_addr is the (ip, port) tuple.
         If connection to client could not be made, Returns None.
         If called by the connection port, returns None, and redirects the client to game_port.
-        Otherwise, returns the sock that is connected to the client."""
+        Otherwise, returns the sock that is connected to the client.
+        sock must be a Sock object."""
         sock.settimeout(timeout)
         try:
-            sock.sendall("GAME SERVER")
+            sock.send_by_size("GAME SERVER")
             debug_print("send ", "GAME SERVER", " - ", str(sock.getsockname()[0]))
-            if sock.recv(1024) != "GAME CLIENT":
+            if sock.recv_by_size() != "GAME CLIENT":
                 raise socket.error
             debug_print("recv ", "GAME CLIENT", " - ", str(sock.getsockname()[0]))
-            sock.sendall("CONNECTED " + str(port))
+            sock.send_by_size("CONNECTED " + str(port))
             debug_print("send ", "CONNECTED", " - ", str(sock.getsockname()[0]))
         except socket.error:
             could_not_connect(sock)
@@ -312,7 +314,7 @@ class Player(object):
         fps is the refresh rate of the client's monitor.
         resolution is a tuple of (width, height) of the client's screen."""
         self.__game = game
-        self.__sock = sock
+        self.sock = sock
         self.__hero = hero
         self.__team = team
         self.__fps = fps
@@ -325,7 +327,7 @@ class Player(object):
         self.__recv = False
         self.__game_attributes = {}
         self.__game_state = []
-        self.sock_name = str(sock.getpeername()[0])
+        self.sock_name = str(sock.getsockname()[0])
 
     @property
     def hero(self):
@@ -335,12 +337,12 @@ class Player(object):
         """Must be called after adding the player object to the game (That was given to the constructor).
         allies and enemies are lists of players.
         Returns None."""
-        self._send("ALLIES")
-        self._send_by_size(pickle.dumps([player.hero for player in allies], pickle.HIGHEST_PROTOCOL), 32)
-        self._send("ENEMIES")
-        self._send_by_size(pickle.dumps([player.hero for player in enemies], pickle.HIGHEST_PROTOCOL), 32)
-        self._send("HERO POS")
-        self._send_by_size(str(allies.index(self)), 32)
+        self.sock.send_by_size("ALLIES")
+        self.sock.send_by_size(pickle.dumps([player.hero for player in allies], pickle.HIGHEST_PROTOCOL))
+        self.sock.send_by_size("ENEMIES")
+        self.sock.send_by_size(pickle.dumps([player.hero for player in enemies], pickle.HIGHEST_PROTOCOL))
+        self.sock.send_by_size("HERO POS")
+        self.sock.send_by_size(str(allies.index(self)))
         self.__update_game_attributes(self.__game.get_state(), self.__game.get_player_attributes())
         # Client is updated.
 
@@ -359,60 +361,13 @@ class Player(object):
     def get_map_name(self):
         return self.__game.get_game_map_name()
 
-    def _send(self, s):
-        """
-        Sends the string to the client.
-        :param s: A string to send to the client.
-        :return: None.
-        """
-        self.__sock.sendall(s)
-
-    def _send_by_size(self, s, header_size):
-        """
-        Sends by size to the client.
-        :param s: A string to send to the client.
-        :param header_size: The size (in bytes) of the header.
-        :return: None.
-        """
-        self.__sock.sendall(str(len(s)).zfill(header_size))
-        self.__sock.sendall(s)
-
-    def _recv(self, size):
-        """
-        Receive a string from the client.
-        :param size: The size (in bytes) to receive. Max.
-        :return: The string received.
-        """
-        return self.__sock.recv(size)
-
-    def _recv_by_size(self, header_size):
-        """
-        Receive by size a string from the client.
-        If an empty string is received (ie, the other side disconnected), an empty string will be returned.
-        :param header_size: The size (in bytes) of the header.
-        :return: The string received.
-        """
-        str_size = ""
-        str_size += self.__sock.recv(header_size)
-        if str_size == "":
-            return ""
-
-        while len(str_size) < header_size:
-            str_size += self.__sock.recv(header_size - len(str_size))
-        size = int(str_size)
-
-        data = ""
-        while len(data) < size:
-            data += self.__sock.recv(size - len(data))
-        return data
-
     def receive_player_data(self):
         """
         Receives data from the player. Recommended to wrap this function in a try/except with socket.error.
         If data cannot be unpickled, will return raw data.
         :return: The data received as a pygame.key.pressed object.
         """
-        data = self._recv_by_size(32)
+        data = self.sock.recv_by_size()
         try:
             return pickle.loads(data)
         except (pickle.UnpicklingError, KeyError):
@@ -449,16 +404,16 @@ class Player(object):
         """
         self.__recv = True
         cnt = 0
-        self.__sock.settimeout(self.__game.timeout)
+        self.sock.settimeout(self.__game.timeout)
         while self.__recv:
             try:
-                data = self._recv_by_size(32)
+                data = self.sock.recv_by_size()
             except socket.timeout:
                 pass
             except socket.error:
                 self.__recv = False
             except AttributeError:
-                if self.__sock is None:
+                if self.sock is None:
                     self.__recv = False
             else:
                 if data == "" or data == "DISCONNECT":
@@ -479,7 +434,7 @@ class Player(object):
         :return: None.
         """
         self.__send = True
-        self.__sock.settimeout(self.__game.timeout)
+        self.sock.settimeout(self.__game.timeout)
         cnt = 0
         snd_cnt = 0
         while self.__send:
@@ -491,7 +446,7 @@ class Player(object):
                 break   # Another thread removed this object while loop was running.
             try:
                 if send != "":
-                    self._send_by_size(send, 32)
+                    self.sock.send_by_size(send)
                     debug_print("sent: %s(%s) - %s" % (cnt, snd_cnt, self.sock_name))
                     snd_cnt += 1
             except socket.error:
@@ -582,14 +537,14 @@ class Player(object):
         except AttributeError:
             return    # Another thread has already removed this object.
         self.__game = None
-        self.__sock = None
+        self.sock = None
         print(str(self.sock_name) + " Disconnected")
 
     def kill(self, msg):
         """This function should be called when the player was killed
         or needs to be taken out of the for any other reason.
         'msg' will be displayed to the player."""
-        self._send_by_size("PLAYER KICKED~%s" % msg, 32)
+        self.sock.send_by_size("PLAYER KICKED~%s" % msg)
         self.remove()
 
     def _updatex(self, newx):
@@ -636,16 +591,16 @@ class Player(object):
         try:
             client = Player(game, sock, None, None, 0, (0, 0))  # dummy
             hero = client.__get_hero(character_side)
-            client._send("TEAM?")
-            team = client._recv_by_size(32)
+            client.sock.send_by_size("TEAM?")
+            team = client.sock.recv_by_size()
             # hero.update_character_image(team)    # Receives character with no image.
-            client._send("FPS?")
-            fps = int(client._recv_by_size(32))
-            client._send("RESOLUTION WIDTH")
-            resolution_x = int(client._recv_by_size(32))
-            client._send("RESOLUTION HEIGHT")
-            resolution_y = int(client._recv_by_size(32))
-            client._send("OK END")
+            client.sock.send_by_size("FPS?")
+            fps = int(client.sock.recv_by_size())
+            client.sock.send_by_size("RESOLUTION WIDTH")
+            resolution_x = int(client.sock.recv_by_size())
+            client.sock.send_by_size("RESOLUTION HEIGHT")
+            resolution_y = int(client.sock.recv_by_size())
+            client.sock.send_by_size("OK END")
             client.__info_for_client(hero, character_side)
         except (socket.error, TypeError):
             could_not_connect(sock)
@@ -658,27 +613,27 @@ class Player(object):
 
     def __get_hero(self, character_side):
         if character_side == Player.client_character:
-            self._send("CHARACTER?")
-            return pickle.loads(self._recv_by_size(32))
+            self.sock.send_by_size("CHARACTER?")
+            return pickle.loads(self.sock.recv_by_size())
         else:
             with open(Player.object_file, 'r+') as f:
                 return pickle.load(f)
 
     def __info_for_client(self, hero, character_side):
         """Part of the Game.get_player_object method that sends data to the client."""
-        if self._recv(8) == "MAP NAME":
-            self._send_by_size(self.get_map_name(), 32)
+        if self.sock.recv_by_size() == "MAP NAME":
+            self.sock.send_by_size(self.get_map_name())
         else:
             raise socket.error
 
         if character_side == Player.server_character:
-            if self._recv(9) == "CHARACTER":
-                self._send_by_size(pickle.dumps(hero), 32)
+            if self.sock.recv_by_size() == "CHARACTER":
+                self.sock.send_by_size(pickle.dumps(hero))
             else:
                 raise socket.error
 
-        # if self._recv(16) == "INACTIVE TIMEOUT":
-        #     self._send_by_size(str(Game.inactive_time_kick), 32)
+        # if self.sock.recv_by_size() == "INACTIVE TIMEOUT":
+        #     self.sock.send_by_size(str(Game.inactive_time_kick))
         # else:
         #     raise socket.error
 
